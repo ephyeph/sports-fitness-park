@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sports & Fitness Park</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        
+        #map {
+            height: 70vh;
+            min-height: 400px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 20px;
+        }
+        
+        .weather-card {
+            background: linear-gradient(135deg, #007bff, #6610f2);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .facility-filter {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        
+        .checkin-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        
+        .btn-park {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            border: none;
+            color: white;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-park:hover {
+            background: linear-gradient(135deg, #218838, #1ea085);
+            color: white;
+            transform: translateY(-1px);
+        }
+        
+        .activity-badge {
+            background: linear-gradient(135deg, #ffc107, #fd7e14);
+            color: white;
+            border: none;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .facility-marker {
+            background: #28a745;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 12px;
+            height: 12px;
+        }
+        
+        .trail-marker {
+            background: #007bff;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 12px;
+            height: 12px;
+        }
+        
+        .amenity-marker {
+            background: #ffc107;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 10px;
+            height: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            #map {
+                height: 50vh;
+                min-height: 300px;
+            }
+            
+            .header h1 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-0">
+                        <i class="fas fa-dumbbell me-2"></i>
+                        Sports & Fitness Park
+                    </h1>
+                    <p class="mb-0 mt-2">Find facilities, plan activities, stay active!</p>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <button class="btn btn-light" onclick="getUserLocation()">
+                        <i class="fas fa-location-arrow me-1"></i>
+                        Find Me
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Left Sidebar -->
+            <div class="col-lg-3">
+                <!-- Weather Card -->
+                <div class="weather-card" id="weatherCard">
+                    <h5><i class="fas fa-cloud-sun me-2"></i>Weather</h5>
+                    <div id="weatherInfo">
+                        <div class="loading">Loading weather...</div>
+                    </div>
+                </div>
+
+                <!-- Facility Filters -->
+                <div class="facility-filter">
+                    <h5><i class="fas fa-filter me-2"></i>Find Activities</h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Facility Type</label>
+                        <select class="form-select" id="facilityFilter" onchange="filterFacilities()">
+                            <option value="">All Facilities</option>
+                            <option value="basketball_court">Basketball Courts</option>
+                            <option value="tennis_court">Tennis Courts</option>
+                            <option value="soccer_field">Soccer Fields</option>
+                            <option value="fitness_area">Fitness Areas</option>
+                            <option value="volleyball_court">Volleyball Courts</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Trail Difficulty</label>
+                        <select class="form-select" id="trailFilter" onchange="filterTrails()">
+                            <option value="">All Trails</option>
+                            <option value="easy">Easy</option>
+                            <option value="moderate">Moderate</option>
+                            <option value="hard">Hard</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-park w-100" onclick="getRecommendations()">
+                        <i class="fas fa-lightbulb me-1"></i>
+                        Get Recommendations
+                    </button>
+                </div>
+
+                <!-- Check-in Form -->
+                <div class="checkin-card">
+                    <h5><i class="fas fa-check-circle me-2"></i>Check-in</h5>
+                    
+                    <form id="checkinForm" onsubmit="handleCheckin(event)">
+                        <div class="mb-3">
+                            <label class="form-label">Your Name</label>
+                            <input type="text" class="form-control" id="userName" required 
+                                   placeholder="Enter your name">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Activity Type</label>
+                            <select class="form-select" id="activityType" required>
+                                <option value="">Select Activity</option>
+                                <option value="basketball">Basketball</option>
+                                <option value="tennis">Tennis</option>
+                                <option value="soccer">Soccer</option>
+                                <option value="running">Running</option>
+                                <option value="walking">Walking</option>
+                                <option value="cycling">Cycling</option>
+                                <option value="fitness">Fitness</option>
+                                <option value="general_recreation">General Recreation</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Party Size</label>
+                            <input type="number" class="form-control" id="partySize" 
+                                   min="1" max="50" value="1" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Notes (Optional)</label>
+                            <textarea class="form-control" id="checkinNotes" rows="2" 
+                                     placeholder="Any additional notes..."></textarea>
+                        </div>
+                        
+                        <div id="checkinMessages"></div>
+                        
+                        <button type="submit" class="btn btn-park w-100" id="checkinBtn">
+                            <i class="fas fa-map-marker-alt me-1"></i>
+                            Check In
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Main Map Area -->
+            <div class="col-lg-9">
+                <div class="mb-3">
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="badge activity-badge">
+                            <i class="fas fa-basketball-ball me-1"></i>Facilities
+                        </span>
+                        <span class="badge bg-primary">
+                            <i class="fas fa-route me-1"></i>Trails
+                        </span>
+                        <span class="badge bg-warning text-dark">
+                            <i class="fas fa-restroom me-1"></i>Amenities
+                        </span>
+                    </div>
+                </div>
+                
+                <div id="map"></div>
+                
+                <!-- Selected Feature Info -->
+                <div id="featureInfo" class="mt-3" style="display: none;">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title" id="featureTitle"></h5>
+                            <div id="featureDetails"></div>
+                            <div id="occupancyInfo"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Leaflet JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+    <!-- Link to external JavaScript file -->
+    <script src="sports-park.js"></script>
+</body>
+</html>
