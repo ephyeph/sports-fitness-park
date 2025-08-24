@@ -6,13 +6,14 @@ let currentLocation = null;
 let selectedFacility = null;
 let selectedTrail = null;
 let facilitiesLayer, trailsLayer, amenitiesLayer;
+let facilityMarkers = {}; // Store markers for updating
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
 // Initialize map
 function initMap() {
-    // Center on Mooresville, Indiana area (approximate park location)
-    map = L.map('map').setView([40.1164, -85.7585], 16);
+    // Center on Central Park, NYC
+    map = L.map('map').setView([40.7829, -73.9654], 14);
     
     // Add OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -31,7 +32,7 @@ function initMap() {
     loadWeather();
 }
 
-// Load facilities from API
+// Load facilities from API with occupancy data
 async function loadFacilities(type = '') {
     try {
         const url = type ? `${API_BASE_URL}/facilities?type=${type}` : `${API_BASE_URL}/facilities`;
@@ -39,32 +40,52 @@ async function loadFacilities(type = '') {
         const facilities = await response.json();
         
         facilitiesLayer.clearLayers();
+        facilityMarkers = {};
         
-        facilities.forEach(facility => {
+        for (const facility of facilities) {
+            // Get occupancy for each facility
+            const occupancyResponse = await fetch(`${API_BASE_URL}/occupancy/${facility.facility_id}`);
+            const occupancy = await occupancyResponse.json();
+            
             const marker = L.circleMarker([facility.latitude, facility.longitude], {
-                color: '#28a745',
-                fillColor: '#28a745',
+                color: occupancy.percentage > 80 ? '#dc3545' : occupancy.percentage > 50 ? '#ffc107' : '#28a745',
+                fillColor: occupancy.percentage > 80 ? '#dc3545' : occupancy.percentage > 50 ? '#ffc107' : '#28a745',
                 fillOpacity: 0.8,
-                radius: 8,
+                radius: 10,
                 weight: 2
             }).addTo(facilitiesLayer);
             
             const popupContent = `
-                <div>
-                    <h6>${facility.name}</h6>
+                <div style="min-width: 250px;">
+                    <h6><strong>${facility.name}</strong></h6>
                     <p><strong>Type:</strong> ${facility.facility_type.replace(/_/g, ' ')}</p>
                     <p><strong>Capacity:</strong> ${facility.capacity} people</p>
                     <p><strong>Surface:</strong> ${facility.surface_type}</p>
                     <p><strong>Lighting:</strong> ${facility.has_lighting ? 'Yes' : 'No'}</p>
                     <p><strong>Accessible:</strong> ${facility.accessible ? 'Yes' : 'No'}</p>
-                    <button class="btn btn-sm btn-park" onclick="selectFacility(${facility.facility_id})">
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        <h6 style="margin-bottom: 8px;">Current Occupancy</h6>
+                        <div style="background: #e9ecef; border-radius: 10px; height: 20px; overflow: hidden;">
+                            <div style="background: ${occupancy.percentage > 80 ? '#dc3545' : occupancy.percentage > 50 ? '#ffc107' : '#28a745'}; 
+                                        width: ${occupancy.percentage}%; height: 100%; color: white; 
+                                        text-align: center; line-height: 20px; font-size: 12px;">
+                                ${occupancy.current}/${occupancy.capacity}
+                            </div>
+                        </div>
+                        <p style="margin-top: 5px; margin-bottom: 0; font-size: 14px;">
+                            <strong>${occupancy.percentage}%</strong> occupied (${occupancy.current} people)
+                        </p>
+                    </div>
+                    <button class="btn btn-sm btn-park" style="margin-top: 10px; width: 100%;" 
+                            onclick="selectFacility(${facility.facility_id})">
                         Select for Check-in
                     </button>
                 </div>
             `;
             
             marker.bindPopup(popupContent);
-        });
+            facilityMarkers[facility.facility_id] = marker;
+        }
         
     } catch (error) {
         console.error('Error loading facilities:', error);
@@ -83,21 +104,27 @@ async function loadTrails(difficulty = '') {
         trails.forEach(trail => {
             const coords = trail.path_coordinates.coordinates.map(coord => [coord[1], coord[0]]);
             
+            // Choose color based on difficulty
+            let color = '#28a745'; // easy - green
+            if (trail.difficulty_level === 'moderate') color = '#ffc107'; // yellow
+            if (trail.difficulty_level === 'hard') color = '#dc3545'; // red
+            
             const polyline = L.polyline(coords, {
-                color: '#007bff',
+                color: color,
                 weight: 4,
                 opacity: 0.8
             }).addTo(trailsLayer);
             
             const popupContent = `
-                <div>
-                    <h6>${trail.name}</h6>
+                <div style="min-width: 200px;">
+                    <h6><strong>${trail.name}</strong></h6>
                     <p><strong>Type:</strong> ${trail.trail_type.replace(/_/g, ' ')}</p>
                     <p><strong>Distance:</strong> ${trail.distance_km} km</p>
-                    <p><strong>Difficulty:</strong> ${trail.difficulty_level}</p>
+                    <p><strong>Difficulty:</strong> <span style="color: ${color}; font-weight: bold;">${trail.difficulty_level}</span></p>
                     <p><strong>Elevation Gain:</strong> ${trail.elevation_gain}m</p>
                     <p><strong>Surface:</strong> ${trail.surface_type}</p>
-                    <button class="btn btn-sm btn-park" onclick="selectTrail(${trail.trail_id})">
+                    <button class="btn btn-sm btn-park" style="margin-top: 10px; width: 100%;"
+                            onclick="selectTrail(${trail.trail_id})">
                         Select for Check-in
                     </button>
                 </div>
@@ -111,28 +138,37 @@ async function loadTrails(difficulty = '') {
     }
 }
 
-// Load amenities from API
-async function loadAmenities() {
+// Load amenities from API with optional filtering
+async function loadAmenities(type = '') {
     try {
         const response = await fetch(`${API_BASE_URL}/amenities`);
-        const amenities = await response.json();
+        let amenities = await response.json();
+        
+        // Filter by type if specified
+        if (type) {
+            amenities = amenities.filter(amenity => amenity.amenity_type === type);
+        }
         
         amenitiesLayer.clearLayers();
         
         amenities.forEach(amenity => {
-            const marker = L.circleMarker([amenity.latitude, amenity.longitude], {
-                color: '#ffc107',
-                fillColor: '#ffc107',
-                fillOpacity: 0.8,
-                radius: 6,
-                weight: 2
+            // Different icons for different amenity types
+            const icon = getAmenityIcon(amenity.amenity_type);
+            
+            const marker = L.marker([amenity.latitude, amenity.longitude], {
+                icon: L.divIcon({
+                    html: `<div style="font-size: 20px; text-shadow: 2px 2px 2px white;">${icon}</div>`,
+                    className: 'amenity-icon',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                })
             }).addTo(amenitiesLayer);
             
             const popupContent = `
                 <div>
-                    <h6>${amenity.amenity_type.replace(/_/g, ' ')}</h6>
+                    <h6><strong>${amenity.name}</strong></h6>
+                    <p><strong>Type:</strong> ${amenity.amenity_type.replace(/_/g, ' ')}</p>
                     <p><strong>Accessible:</strong> ${amenity.accessible ? 'Yes' : 'No'}</p>
-                    ${amenity.operating_hours ? `<p><strong>Hours:</strong> ${amenity.operating_hours}</p>` : ''}
                 </div>
             `;
             
@@ -229,6 +265,9 @@ function selectFacility(facilityId) {
     selectedTrail = null;
     document.getElementById('activityType').focus();
     showMessage('checkinMessages', 'Facility selected! Please complete the check-in form.', 'success');
+    
+    // Show selected facility info
+    displaySelectedFeature('facility', facilityId);
 }
 
 // Select trail for check-in
@@ -237,6 +276,65 @@ function selectTrail(trailId) {
     selectedFacility = null;
     document.getElementById('activityType').focus();
     showMessage('checkinMessages', 'Trail selected! Please complete the check-in form.', 'success');
+    
+    // Show selected trail info
+    displaySelectedFeature('trail', trailId);
+}
+
+// Display selected feature information
+async function displaySelectedFeature(type, id) {
+    const featureInfo = document.getElementById('featureInfo');
+    const featureTitle = document.getElementById('featureTitle');
+    const featureDetails = document.getElementById('featureDetails');
+    const occupancyInfo = document.getElementById('occupancyInfo');
+    
+    if (type === 'facility') {
+        const response = await fetch(`${API_BASE_URL}/facilities`);
+        const facilities = await response.json();
+        const facility = facilities.find(f => f.facility_id === id);
+        
+        if (facility) {
+            featureTitle.innerHTML = `Selected: ${facility.name}`;
+            featureDetails.innerHTML = `
+                <p><strong>Type:</strong> ${facility.facility_type.replace(/_/g, ' ')}</p>
+                <p><strong>Ready for check-in!</strong></p>
+            `;
+            
+            // Load and display occupancy
+            const occupancyResponse = await fetch(`${API_BASE_URL}/occupancy/${id}`);
+            const occupancy = await occupancyResponse.json();
+            
+            occupancyInfo.innerHTML = `
+                <div class="mt-3">
+                    <h6>Current Occupancy</h6>
+                    <div class="progress">
+                        <div class="progress-bar ${occupancy.percentage > 80 ? 'bg-danger' : occupancy.percentage > 50 ? 'bg-warning' : 'bg-success'}" 
+                             style="width: ${occupancy.percentage}%">
+                            ${occupancy.current}/${occupancy.capacity}
+                        </div>
+                    </div>
+                    <p class="mt-2 mb-0">${occupancy.percentage}% occupied</p>
+                </div>
+            `;
+            
+            featureInfo.style.display = 'block';
+        }
+    } else if (type === 'trail') {
+        const response = await fetch(`${API_BASE_URL}/trails`);
+        const trails = await response.json();
+        const trail = trails.find(t => t.trail_id === id);
+        
+        if (trail) {
+            featureTitle.innerHTML = `Selected: ${trail.name}`;
+            featureDetails.innerHTML = `
+                <p><strong>Distance:</strong> ${trail.distance_km} km</p>
+                <p><strong>Difficulty:</strong> ${trail.difficulty_level}</p>
+                <p><strong>Ready for check-in!</strong></p>
+            `;
+            occupancyInfo.innerHTML = '';
+            featureInfo.style.display = 'block';
+        }
+    }
 }
 
 // Handle check-in form submission
@@ -278,13 +376,18 @@ async function handleCheckin(event) {
         if (response.ok) {
             showMessage('checkinMessages', 'Check-in successful! Enjoy your activity!', 'success');
             document.getElementById('checkinForm').reset();
+            
+            // Reload facilities to update occupancy colors
+            if (selectedFacility) {
+                setTimeout(() => {
+                    loadFacilities(document.getElementById('facilityFilter').value);
+                    displaySelectedFeature('facility', selectedFacility);
+                }, 500);
+            }
+            
             selectedFacility = null;
             selectedTrail = null;
             
-            // Reload occupancy data
-            if (selectedFacility) {
-                loadOccupancy(selectedFacility);
-            }
         } else {
             showMessage('checkinMessages', result.error || 'Check-in failed. Please try again.', 'error');
         }
@@ -295,27 +398,134 @@ async function handleCheckin(event) {
     }
 }
 
-// Get activity recommendations
-async function getRecommendations() {
+// Filter amenities
+function filterAmenities() {
+    const filterValue = document.getElementById('amenityFilter').value;
+    loadAmenities(filterValue);
+}
+
+// Find nearby amenities based on user location
+async function findNearbyAmenities() {
+    // First try to get user location if we don't have it
+    if (!currentLocation) {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    currentLocation = [position.coords.latitude, position.coords.longitude];
+                    
+                    // Add marker for user location
+                    L.marker(currentLocation, {
+                        icon: L.icon({
+                            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                            iconSize: [25, 41],
+                            iconAnchor: [12, 41],
+                            popupAnchor: [1, -34],
+                            shadowSize: [41, 41]
+                        })
+                    }).addTo(map).bindPopup('You are here!').openPopup();
+                    
+                    // Center map on user location
+                    map.setView(currentLocation, 16);
+                    
+                    // Now find nearby amenities
+                    await displayNearbyAmenities();
+                },
+                (error) => {
+                    showMessage('checkinMessages', 'Please enable location services to find nearby amenities.', 'error');
+                }
+            );
+        } else {
+            showMessage('checkinMessages', 'Geolocation is not supported by your browser.', 'error');
+        }
+    } else {
+        // We already have location, just find amenities
+        await displayNearbyAmenities();
+    }
+}
+
+// Display nearby amenities
+async function displayNearbyAmenities() {
     try {
-        const response = await fetch(`${API_BASE_URL}/recommendations`);
-        const recommendations = await response.json();
+        const response = await fetch(`${API_BASE_URL}/amenities`);
+        const amenities = await response.json();
         
-        let message = '<h6>Today\'s Recommendations:</h6><ul>';
-        recommendations.forEach(rec => {
-            message += `<li><strong>${rec.name}</strong> - ${rec.reason}</li>`;
+        // Calculate distances from current location
+        const amenitiesWithDistance = amenities.map(amenity => {
+            const distance = calculateDistance(
+                currentLocation[0], currentLocation[1],
+                amenity.latitude, amenity.longitude
+            );
+            return { ...amenity, distance };
         });
-        message += '</ul>';
         
-        document.getElementById('featureTitle').innerHTML = 'Activity Recommendations';
-        document.getElementById('featureDetails').innerHTML = message;
-        document.getElementById('occupancyInfo').innerHTML = '';
-        document.getElementById('featureInfo').style.display = 'block';
+        // Sort by distance and get top 3
+        amenitiesWithDistance.sort((a, b) => a.distance - b.distance);
+        const nearest = amenitiesWithDistance.slice(0, 3);
+        
+        // Display results
+        const nearbyResults = document.getElementById('nearbyResults');
+        const nearbyList = document.getElementById('nearbyList');
+        
+        let html = '';
+        nearest.forEach((amenity, index) => {
+            const icon = getAmenityIcon(amenity.amenity_type);
+            html += `
+                <div class="nearby-item">
+                    <strong>${icon} ${amenity.name}</strong><br>
+                    <small>Type: ${amenity.amenity_type.replace(/_/g, ' ')}</small><br>
+                    <small>Distance: ${(amenity.distance * 1000).toFixed(0)} meters</small>
+                </div>
+            `;
+        });
+        
+        nearbyList.innerHTML = html;
+        nearbyResults.style.display = 'block';
+        
+        // Optionally zoom map to show user and nearest amenities
+        const bounds = L.latLngBounds([currentLocation]);
+        nearest.forEach(amenity => {
+            bounds.extend([amenity.latitude, amenity.longitude]);
+        });
+        map.fitBounds(bounds, { padding: [50, 50] });
         
     } catch (error) {
-        console.error('Error getting recommendations:', error);
-        showMessage('checkinMessages', 'Unable to get recommendations at this time.', 'error');
+        console.error('Error finding nearby amenities:', error);
+        showMessage('checkinMessages', 'Error finding nearby amenities.', 'error');
     }
+}
+
+// Calculate distance between two points (Haversine formula)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
+
+function toRad(deg) {
+    return deg * (Math.PI/180);
+}
+
+// Get amenity icon
+function getAmenityIcon(type) {
+    const icons = {
+        'restroom': '🚻',
+        'water_fountain': '💧',
+        'parking': '🅿️',
+        'first_aid': '🏥',
+        'picnic_table': '🏕️',
+        'bench': '🪑',
+        'bike_rack': '🚲',
+        'information_kiosk': 'ℹ️',
+        'trash_bin': '🗑️'
+    };
+    return icons[type] || '📍';
 }
 
 // Load facility occupancy
@@ -362,10 +572,9 @@ window.onload = function() {
     // Refresh weather every 10 minutes
     setInterval(loadWeather, 600000);
     
-    // Refresh occupancy data every minute
+    // Refresh facilities (and their occupancy) every 30 seconds
     setInterval(() => {
-        if (selectedFacility) {
-            loadOccupancy(selectedFacility);
-        }
-    }, 60000);
+        const currentFilter = document.getElementById('facilityFilter').value;
+        loadFacilities(currentFilter);
+    }, 30000);
 };
